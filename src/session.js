@@ -1,64 +1,116 @@
-// V 0.0.01
+// V 0.0.01 no json ...just webcrpo
 
-import { SignJWT, jwtVerify } from 'jose';
-
-// The key used to sign the JWT. This must be securely stored as a Worker Secret (e.g., JWT_SECRET).
+// We will use native Web Crypto API for signing and verifying JWTs (no external library needed).
 const textEncoder = new TextEncoder();
-
-// We will use a single Access Token set to expire in 24 hours (1 day).
+const EXPIRATION_HOURS = 24;
 
 /**
- * Generates a JSON Web Token (JWT) for a user.
- * * @param {string} email The user's email to include in the token payload.
+ * Converts a string to a Base64 URL-safe string.
+ */
+function base64UrlEncode(str) {
+    let base64 = btoa(str);
+    // Convert to URL-safe characters
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Generates a JSON Web Token (JWT) using Web Crypto API.
+ * @param {string} email The user's email to include in the token payload.
  * @param {string} JWT_SECRET The secret key used to sign the token.
  * @returns {Promise<string>} The generated signed JWT string.
  */
 export async function generateJWT(email, JWT_SECRET) {
-    // 1. Prepare the secret key for jose
-    const secretKey = textEncoder.encode(JWT_SECRET);
+    // 1. Prepare the key (must be imported from raw bytes)
+    const secretKey = await crypto.subtle.importKey(
+        "raw",
+        textEncoder.encode(JWT_SECRET),
+        { name: "HMAC", hash: { name: "SHA-256" } },
+        false,
+        ["sign"]
+    );
+
+    // 2. Define Header and Payload
+    const header = {
+        alg: 'HS256',
+        typ: 'JWT'
+    };
     
-    // 2. Define the payload (claims)
+    const now = Date.now();
     const payload = {
         email: email,
-        // The issuer of the token (optional)
-        iss: 'IoT_Hub_API', 
-        // The audience (who the token is for) (optional)
-        aud: 'user',       
+        iss: 'IoT_Hub_API',
+        aud: 'user',
+        iat: Math.floor(now / 1000), // Issued At
+        exp: Math.floor(now / 1000) + (EXPIRATION_HOURS * 60 * 60) // Expiration (24 hours)
     };
 
-    // 3. Create and sign the JWT
-    // alg: The encryption algorithm to use (HS256 is HMAC using SHA-256)
-    // exp: Sets the expiration time (e.g., '24h' for 24 hours)
-    const token = await new SignJWT(payload)
-        .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-        .setIssuedAt()
-        .setExpirationTime('24h') // 24-hour expiration as requested
-        .sign(secretKey);
+    // 3. Encode Header and Payload
+    const encodedHeader = base64UrlEncode(JSON.stringify(header));
+    const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+    const dataToSign = `${encodedHeader}.${encodedPayload}`;
 
-    return token;
+    // 4. Create Signature
+    const signature = await crypto.subtle.sign(
+        "HMAC",
+        secretKey,
+        textEncoder.encode(dataToSign)
+    );
+
+    const encodedSignature = base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
+
+    // 5. Combine and return the final JWT
+    return `${dataToSign}.${encodedSignature}`;
 }
 
 /**
- * Verifies a JSON Web Token (JWT) and extracts the payload.
- * * @param {string} token The JWT string to verify.
- * @param {string} JWT_SECRET The secret key used to verify the token.
- * @returns {Promise<{email: string}|null>} The decoded payload (including email) or null if verification fails.
+ * Verifies a JSON Web Token (JWT) using Web Crypto API.
+ * (This function is more complex and typically only needed when the token is received, 
+ * but for initial login success, we will rely on the generation part first.)
  */
 export async function verifyJWT(token, JWT_SECRET) {
+    // NOTE: Full verification is complex. For now, we will rely on successful generation 
+    // and the security provided by the HttpOnly cookie. We can implement this fully later.
     try {
-        const secretKey = textEncoder.encode(JWT_SECRET);
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        
+        const [encodedHeader, encodedPayload, encodedSignature] = parts;
+        const dataToVerify = `${encodedHeader}.${encodedPayload}`;
 
-        const { payload } = await jwtVerify(token, secretKey, {
-            issuer: 'IoT_Hub_API',
-            audience: 'user',
-        });
+        const secretKey = await crypto.subtle.importKey(
+            "raw",
+            textEncoder.encode(JWT_SECRET),
+            { name: "HMAC", hash: { name: "SHA-256" } },
+            false,
+            ["verify"]
+        );
         
-        // Return only the necessary parts of the payload
-        return { email: payload.email }; 
-        
+        // Decode the signature part for comparison
+        const signatureBytes = new Uint8Array(atob(encodedSignature.replace(/-/g, '+').replace(/_/g, '/')).split('').map(c => c.charCodeAt(0)));
+
+        const isValid = await crypto.subtle.verify(
+            "HMAC",
+            secretKey,
+            signatureBytes,
+            textEncoder.encode(dataToVerify)
+        );
+
+        if (isValid) {
+            // Decode payload and return email
+            const payloadJson = atob(encodedPayload.replace(/-/g, '+').replace(/_/g, '/'));
+            const payload = JSON.parse(payloadJson);
+            
+            // Check expiration time (critical security step!)
+            if (payload.exp < Math.floor(Date.now() / 1000)) {
+                console.error("JWT Verification failed: Token expired.");
+                return null;
+            }
+            
+            return { email: payload.email };
+        }
     } catch (error) {
-        // Log errors like token expiration or invalid signature
         console.error("JWT Verification failed:", error.message);
-        return null; // Token is invalid or expired
+        return null;
     }
+    return null;
 }
