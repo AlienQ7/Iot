@@ -1,4 +1,11 @@
 // V 0.0.01
+
+import { generateJWT } from './session'; // Import the function from our new session.js file
+
+// =================================================================
+// PASSWORD HASHING/VERIFICATION FUNCTIONS
+// =================================================================
+
 // Function to generate a secure hash for a password using Web Crypto API (required for Workers)
 async function hashPassword(password) {
     const salt = crypto.getRandomValues(new Uint8Array(16)); // 16-byte salt
@@ -67,7 +74,6 @@ async function verifyPassword(password, storedHash) {
     const incomingHash = new Uint8Array(derivedBits);
 
     // Use Web Crypto's timing-safe comparison to prevent timing attacks
-    // This is the most critical security step for verification
     return crypto.subtle.timingSafeEqual(incomingHash, storedHashOnly);
 }
 
@@ -129,6 +135,59 @@ export async function handleSignUp(request, env) {
 
 
 export async function handleLogin(request, env) {
-    // This will be implemented in the next step!
-    return new Response('Login handler in progress...', { status: 501 });
+    let email, password;
+    
+    // Step 1: Robust JSON Parsing
+    try {
+        ({ email, password } = await request.json());
+    } catch (e) {
+        return new Response('Invalid JSON format in request body.', { status: 400 });
+    }
+
+    try {
+        // Step 2: Input Validation
+        if (!email || !password) {
+            return new Response('Email and password required.', { status: 400 });
+        }
+
+        // Step 3: Retrieve user from D1
+        const { results } = await env.dataiot.prepare(
+            "SELECT password_hash FROM users WHERE email = ?"
+        ).bind(email).all();
+
+        const user = results[0];
+
+        // Check if user exists
+        if (!user) {
+            // Use a generic failure message for security (prevents enumeration attacks)
+            return new Response(JSON.stringify({ success: false, message: 'Invalid credentials.' }), { status: 401 });
+        }
+
+        // Step 4: Verify Password
+        const isValid = await verifyPassword(password, user.password_hash);
+
+        if (!isValid) {
+            return new Response(JSON.stringify({ success: false, message: 'Invalid credentials.' }), { status: 401 });
+        }
+
+        // Step 5: Generate JWT Token (24-hour expiration)
+        const token = await generateJWT(email, env.JWT_SECRET);
+        
+        // Calculate the expiration date (1 day from now)
+        const expirationDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toUTCString();
+
+        // Step 6: Success Response with Secure HttpOnly Cookie
+        return new Response(JSON.stringify({ success: true, message: 'Login successful.', token }), {
+            status: 200,
+            headers: { 
+                'Content-Type': 'application/json',
+                // Set the JWT as an HttpOnly, Secure, SameSite=Lax cookie
+                'Set-Cookie': `auth_token=${token}; Expires=${expirationDate}; Path=/; HttpOnly; Secure; SameSite=Lax`
+            },
+        });
+
+    } catch (error) {
+        console.error("Login error:", error);
+        return new Response('Internal Server Error', { status: 500 });
+    }
 }
