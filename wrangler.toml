@@ -2,11 +2,8 @@ name = "iot"
 main = "src/index.js"
 compatibility_date = "2024-06-03"
 
-# D1 databases MUST be defined as an array (using [[...]])
+# D1 databases definition - MUST be an array
 [[d1_databases]]
 binding = "dataiot"
 database_name = "iotbase"
 database_id = "06d4d2a7-f235-43a9-b36d-556b27d5440c"
-
-# Compatibility Flags MUST be defined as an array of strings
-compatibility_flags = ["nodejs_compat"]
