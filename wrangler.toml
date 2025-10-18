@@ -1,4 +1,4 @@
-name = "iot"
+name = "iot12"
 main = "src/index.js"
 compatibility_date = "2024-06-03"
 
