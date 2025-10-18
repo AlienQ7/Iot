@@ -15,7 +15,7 @@ async function hashPassword(password) {
         {
             name: 'PBKDF2',
             salt: salt,
-            iterations: 500000, // High iteration count for security
+            iterations: 100000, // High iteration count for security
             hash: 'SHA-256',
         },
         key,
