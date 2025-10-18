@@ -1,4 +1,4 @@
-// V 0.0.01 no json ...just webcrpo
+// V 0.0.01
 
 // We will use native Web Crypto API for signing and verifying JWTs (no external library needed).
 const textEncoder = new TextEncoder();
@@ -64,12 +64,11 @@ export async function generateJWT(email, JWT_SECRET) {
 
 /**
  * Verifies a JSON Web Token (JWT) using Web Crypto API.
- * (This function is more complex and typically only needed when the token is received, 
- * but for initial login success, we will rely on the generation part first.)
+ * * @param {string} token The JWT string to verify.
+ * @param {string} JWT_SECRET The secret key used to verify the token.
+ * @returns {Promise<{email: string}|null>} The decoded payload (including email) or null if verification fails.
  */
 export async function verifyJWT(token, JWT_SECRET) {
-    // NOTE: Full verification is complex. For now, we will rely on successful generation 
-    // and the security provided by the HttpOnly cookie. We can implement this fully later.
     try {
         const parts = token.split('.');
         if (parts.length !== 3) return null;
