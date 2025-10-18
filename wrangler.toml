@@ -1,0 +1,10 @@
+name = "iot"
+main = "src/index.js"
+compatibility_date = "2024-06-03"
+node_compat = true
+
+[d1_databases]
+# Binds your existing D1 database (iotbase) to the variable name 'dataiot' in your code (env.dataiot)
+binding = "dataiot"
+database_name = "iotbase"
+database_id = "06d4d2a7-f235-43a9-b36d-556b27d5440c"
