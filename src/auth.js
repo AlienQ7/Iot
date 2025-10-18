@@ -1,3 +1,4 @@
+// V 0.0.01
 // Function to generate a secure hash for a password using Web Crypto API (required for Workers)
 async function hashPassword(password) {
     const salt = crypto.getRandomValues(new Uint8Array(16)); // 16-byte salt
@@ -15,7 +16,7 @@ async function hashPassword(password) {
         {
             name: 'PBKDF2',
             salt: salt,
-            iterations: 100000, // High iteration count for security
+            iterations: 100000, // High iteration count for security (Cloudflare limit)
             hash: 'SHA-256',
         },
         key,
@@ -31,10 +32,53 @@ async function hashPassword(password) {
     return btoa(String.fromCharCode(...combined));
 }
 
+// Function to verify an incoming password against the stored combined hash/salt
+async function verifyPassword(password, storedHash) {
+    // 1. Decode the Base64 stored hash string back into a byte array
+    const combinedBytes = new Uint8Array(atob(storedHash).split('').map(char => char.charCodeAt(0)));
+    
+    // 2. Separate the salt (first 16 bytes) from the hash (remaining bytes)
+    const salt = combinedBytes.slice(0, 16);
+    const storedHashOnly = combinedBytes.slice(16);
+
+    const passwordBuffer = new TextEncoder().encode(password);
+
+    const key = await crypto.subtle.importKey(
+        'raw', 
+        passwordBuffer, 
+        { name: 'PBKDF2' }, 
+        false, 
+        ['deriveBits', 'deriveKey']
+    );
+
+    // 3. Re-hash the incoming password using the extracted salt
+    const derivedBits = await crypto.subtle.deriveBits(
+        {
+            name: 'PBKDF2',
+            salt: salt,
+            iterations: 100000, // MUST use the same iteration count!
+            hash: 'SHA-256',
+        },
+        key,
+        256 // 256 bits (32 bytes)
+    );
+    
+    // 4. Compare the newly generated hash with the stored hash
+    const incomingHash = new Uint8Array(derivedBits);
+
+    // Use Web Crypto's timing-safe comparison to prevent timing attacks
+    // This is the most critical security step for verification
+    return crypto.subtle.timingSafeEqual(incomingHash, storedHashOnly);
+}
+
+// =================================================================
+// ACCOUNT HANDLERS
+// =================================================================
+
 export async function handleSignUp(request, env) {
     let email, password;
     
-    // Step 1: Robust JSON Parsing (Prevents $500 crash on bad input)
+    // Step 1: Robust JSON Parsing
     try {
         ({ email, password } = await request.json());
     } catch (e) {
@@ -59,7 +103,7 @@ export async function handleSignUp(request, env) {
         // Step 3: Hash Password
         const password_hash = await hashPassword(password);
 
-        // Step 4: Insert into D1 (env.dataiot is bound via wrangler.toml)
+        // Step 4: Insert into D1
         const stmt = env.dataiot.prepare(
             "INSERT INTO users (email, password_hash) VALUES (?, ?)"
         ).bind(email, password_hash);
@@ -81,4 +125,10 @@ export async function handleSignUp(request, env) {
         console.error("Signup error:", error);
         return new Response('Internal Server Error', { status: 500 });
     }
+}
+
+
+export async function handleLogin(request, env) {
+    // This will be implemented in the next step!
+    return new Response('Login handler in progress...', { status: 501 });
 }
